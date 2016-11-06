@@ -8,6 +8,7 @@ import numpy as np
 import random
 import time
 import sys
+from scipy.io.wavfile import write
 
 
 
@@ -115,9 +116,6 @@ def decode_embed(array, vocab):
 
 
 
-
-
-
 ckpt_file = ""
 TEST_PREFIX = np.array([[0]*4800])
 
@@ -141,11 +139,11 @@ in_size = out_size = 4800
 lstm_size = 256 #128
 num_layers = 2
 batch_size = 32 #128
-time_steps = 10 #50
+time_steps = 9 #50
 
 NUM_TRAIN_BATCHES = 20000
 
-LEN_TEST_TEXT = 50 # Number of test characters of text to generate after training the network
+LEN_TEST_TEXT = 18 # Number of test characters of text to generate after training the network
 
 
 
@@ -184,9 +182,8 @@ if ckpt_file == "":
 			ind1 = [k+j for k in batch_id]
 			ind2 = [k+j+1 for k in batch_id]
 
-			batch[:, j, :] = data[ind1, :]
-			batch_y[:, j, :] = data[ind2, :]
-
+			batch[:, j, :] = data[batch_id, ind1, :]
+			batch_y[:, j, :] = data[batch_id, ind2, :]
 
 		cst = net.train_batch(batch, batch_y)
 
@@ -194,12 +191,9 @@ if ckpt_file == "":
 			new_time = time.time()
 			diff = new_time - last_time
 			last_time = new_time
-
 			print "batch: ",i,"   loss: ",cst,"   speed: ",(100.0/diff)," batches / s"
 
 	saver.save(sess, "saved/model.ckpt")
-
-
 
 
 ## 2) GENERATE LEN_TEST_TEXT CHARACTERS USING THE TRAINED NETWORK
@@ -207,15 +201,14 @@ if ckpt_file == "":
 if ckpt_file != "":
 	saver.restore(sess, ckpt_file)
 
-
 for i in range(len(TEST_PREFIX)):
 	out = net.run_step(TEST_PREFIX[i], i==0)
 
-print "SENTENCE:"
+print "GENERATING"
 gen = TEST_PREFIX
 for i in range(LEN_TEST_TEXT):
 	#element = np.random.choice( range(len(vocab)), p=out ) # Sample character from the network according to the generated output probabilities
 	np.concatenate((gen, out))
-
 	out = net.run_step(out , False )
-print gen
+scaled = np.int16(data/np.max(np.abs(data)) * 32767)
+write('test.wav', 4800, scaled)
