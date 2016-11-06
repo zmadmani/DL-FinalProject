@@ -1,113 +1,221 @@
-'''
-A Recurrent Neural Network (LSTM) implementation example using TensorFlow library.
-This example is using the MNIST database of handwritten digits (http://yann.lecun.com/exdb/mnist/)
-Long Short Term Memory paper: http://deeplearning.cs.cmu.edu/pdfs/Hochreiter97_lstm.pdf
-Author: Aymeric Damien
-Project: https://github.com/aymericdamien/TensorFlow-Examples/
-'''
+"""
+Text generation using a Recurrent Neural Network (LSTM).
+"""
 
-from __future__ import print_function
 
 import tensorflow as tf
-from tensorflow.python.ops import rnn, rnn_cell
 import numpy as np
-
-# Import MNIST data
-from tensorflow.examples.tutorials.mnist import input_data
-mnist = input_data.read_data_sets("/tmp/data/", one_hot=True)
-
-'''
-To classify images using a recurrent neural network, we consider every image
-row as a sequence of pixels. Because MNIST image shape is 28*28px, we will then
-handle 28 sequences of 28 steps for every sample.
-'''
-
-# Parameters
-learning_rate = 0.001
-training_iters = 100000
-batch_size = 128
-display_step = 10
-
-# Network Parameters
-n_input = 28 # MNIST data input (img shape: 28*28)
-n_steps = 28 # timesteps
-n_hidden = 128 # hidden layer num of features
-n_classes = 10 # MNIST total classes (0-9 digits)
-
-# tf Graph input
-x = tf.placeholder("float", [None, n_steps, n_input])
-y = tf.placeholder("float", [None, n_classes])
-
-# Define weights
-weights = {
-    'out': tf.Variable(tf.random_normal([n_hidden, n_classes]))
-}
-biases = {
-    'out': tf.Variable(tf.random_normal([n_classes]))
-}
+import random
+import time
+import sys
 
 
-def RNN(x, weights, biases):
 
-    # Prepare data shape to match `rnn` function requirements
-    # Current data input shape: (batch_size, n_steps, n_input)
-    # Required shape: 'n_steps' tensors list of shape (batch_size, n_input)
+## RNN with num_layers LSTM layers and a fully-connected output layer
+## The network allows for a dynamic number of iterations, depending on the inputs it receives.
+##
+##    out   (fc layer; out_size)
+##     ^
+##    lstm
+##     ^
+##    lstm  (lstm size)
+##     ^
+##     in   (in_size)
+class ModelNetwork:
+	def __init__(self, in_size, lstm_size, num_layers, out_size, session, learning_rate=0.003, name="rnn"):
+		self.scope = name
 
-    # Permuting batch_size and n_steps
-    x = tf.transpose(x, [1, 0, 2])
-    # Reshaping to (n_steps*batch_size, n_input)
-    x = tf.reshape(x, [-1, n_input])
-    # Split to get a list of 'n_steps' tensors of shape (batch_size, n_input)
-    x = tf.split(0, n_steps, x)
+		self.in_size = in_size
+		self.lstm_size = lstm_size
+		self.num_layers = num_layers
+		self.out_size = out_size
 
-    # Define a lstm cell with tensorflow
-    lstm_cell = rnn_cell.BasicLSTMCell(n_hidden, forget_bias=1.0)
+		self.session = session
 
-    # Get lstm cell output
-    outputs, states = rnn.rnn(lstm_cell, x, dtype=tf.float32)
+		self.learning_rate = tf.constant( learning_rate )
 
-    # Linear activation, using rnn inner loop last output
-    return tf.matmul(outputs[-1], weights['out']) + biases['out']
+		# Last state of LSTM, used when running the network in TEST mode
+		self.lstm_last_state = np.zeros((self.num_layers*2*self.lstm_size,))
 
-pred = RNN(x, weights, biases)
-# Define loss and optimizer
-cost = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(pred, y))
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+		with tf.variable_scope(self.scope):
+			## (batch_size, timesteps, in_size)
+			self.xinput = tf.placeholder(tf.float32, shape=(None, None, self.in_size), name="xinput")
+			self.lstm_init_value = tf.placeholder(tf.float32, shape=(None, self.num_layers*2*self.lstm_size), name="lstm_init_value")
 
-# Evaluate model
-printer = tf.Print(pred)
-correct_pred = tf.equal(tf.argmax(pred,1), tf.argmax(y,1))
-accuracy = tf.reduce_mean(tf.cast(correct_pred, tf.float32))
+			# LSTM
+			# TODO: migrate to state_is_tuple = True
+			self.lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(self.lstm_size, forget_bias=1.0, state_is_tuple=False)
+			self.lstm = tf.nn.rnn_cell.MultiRNNCell([self.lstm_cell] * self.num_layers)
 
-# Initializing the variables
-init = tf.initialize_all_variables()
+			# Iteratively compute output of recurrent network
+			outputs, self.lstm_new_state = tf.nn.dynamic_rnn(self.lstm, self.xinput, initial_state=self.lstm_init_value)
 
-# Launch the graph
-with tf.Session() as sess:
-    sess.run(init)
-    step = 1
-    # Keep training until reach max iterations
-    while step * batch_size < training_iters:
-        batch_x, batch_y = mnist.train.next_batch(batch_size)
-        # Reshape data to get 28 seq of 28 elements
-        batch_x = batch_x.reshape((batch_size, n_steps, n_input))
-        # Run optimization op (backprop)
-        sess.run(optimizer, feed_dict={x: batch_x, y: batch_y})
-        if step % display_step == 0:
-            # Calculate batch accuracy
-            acc = sess.run(accuracy, feed_dict={x: batch_x, y: batch_y})
-            # Calculate batch loss
-            loss = sess.run(cost, feed_dict={x: batch_x, y: batch_y})
-            print("Iter " + str(step*batch_size) + ", Minibatch Loss= " + \
-                  "{:.6f}".format(loss) + ", Training Accuracy= " + \
-                  "{:.5f}".format(acc))
-			sess.run(printer, feed_dict={x: batch_x, y: batch_y})
-        step += 1
-    print("Optimization Finished!")
+			# Linear activation (FC layer on top of the LSTM net)
+			self.rnn_out_W = tf.Variable(tf.random_normal( (self.lstm_size, self.out_size), stddev=0.01 ))
+			self.rnn_out_B = tf.Variable(tf.random_normal( (self.out_size, ), stddev=0.01 ))
 
-    # Calculate accuracy for 128 mnist test images
-    test_len = 128
-    test_data = mnist.test.images[:test_len].reshape((-1, n_steps, n_input))
-    test_label = mnist.test.labels[:test_len]
-    print("Testing Accuracy:", \
-        sess.run(accuracy, feed_dict={x: test_data, y: test_label}))
+			outputs_reshaped = tf.reshape( outputs, [-1, self.lstm_size] )
+			network_output = ( tf.matmul( outputs_reshaped, self.rnn_out_W ) + self.rnn_out_B )
+
+			batch_time_shape = tf.shape(outputs)
+			self.final_outputs = tf.reshape( tf.nn.softmax( network_output), (batch_time_shape[0], batch_time_shape[1], self.out_size) )
+
+
+			## Training: provide target outputs for supervised training.
+			self.y_batch = tf.placeholder(tf.float32, (None, None, self.out_size))
+			y_batch_long = tf.reshape(self.y_batch, [-1, self.out_size])
+
+			self.cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(network_output, y_batch_long) )
+			self.train_op = tf.train.RMSPropOptimizer(self.learning_rate, 0.9).minimize(self.cost)
+
+
+	## Input: X is a single element, not a list!
+	def run_step(self, x, init_zero_state=True):
+		## Reset the initial state of the network.
+		if init_zero_state:
+			init_value = np.zeros((self.num_layers*2*self.lstm_size,))
+		else:
+			init_value = self.lstm_last_state
+
+		out, next_lstm_state = self.session.run([self.final_outputs, self.lstm_new_state], feed_dict={self.xinput:[x], self.lstm_init_value:[init_value]   } )
+
+		self.lstm_last_state = next_lstm_state[0]
+
+		return out[0][0]
+
+
+	## xbatch must be (batch_size, timesteps, input_size)
+	## ybatch must be (batch_size, timesteps, output_size)
+	def train_batch(self, xbatch, ybatch):
+		init_value = np.zeros((xbatch.shape[0], self.num_layers*2*self.lstm_size))
+
+		cost, _ = self.session.run([self.cost, self.train_op], feed_dict={self.xinput:xbatch, self.y_batch:ybatch, self.lstm_init_value:init_value   } )
+
+		return cost
+
+
+
+
+# Embed string to character-arrays -- it generates an array len(data) x len(vocab)
+# Vocab is a list of elements
+def embed_to_vocab(data_, vocab):
+	data = np.zeros((len(data_), len(vocab)))
+
+	cnt=0
+	for s in data_:
+		v = [0.0]*len(vocab)
+		v[vocab.index(s)] = 1.0
+		data[cnt, :] = v
+		cnt += 1
+
+	return data
+
+def decode_embed(array, vocab):
+	return vocab[ array.index(1) ]
+
+
+
+
+
+
+ckpt_file = ""
+TEST_PREFIX = np.array([[0]*4800])
+
+print "Usage:"
+print '\t\t ', sys.argv[0], ' [ckpt model to load] [prefix, e.g., "The "]'
+if len(sys.argv)>=2:
+	ckpt_file=sys.argv[1]
+if len(sys.argv)==3:
+	TEST_PREFIX = sys.argv[2]
+
+
+
+
+## Convert to 1-hot coding
+# vocab = list(set(data_))
+
+data = np.load("./dataset.npy")
+
+
+in_size = out_size = 4800
+lstm_size = 256 #128
+num_layers = 2
+batch_size = 32 #128
+time_steps = 10 #50
+
+NUM_TRAIN_BATCHES = 20000
+
+LEN_TEST_TEXT = 50 # Number of test characters of text to generate after training the network
+
+
+
+## Initialize the network
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+sess = tf.InteractiveSession(config=config)
+
+net = ModelNetwork(in_size = in_size,
+					lstm_size = lstm_size,
+					num_layers = num_layers,
+					out_size = out_size,
+					session = sess,
+					learning_rate = 0.003,
+					name = "char_rnn_network")
+
+sess.run( tf.initialize_all_variables() )
+
+saver = tf.train.Saver(tf.all_variables())
+
+
+
+## 1) TRAIN THE NETWORK
+if ckpt_file == "":
+	last_time = time.time()
+
+	batch = np.zeros((batch_size, time_steps, in_size))
+	batch_y = np.zeros((batch_size, time_steps, in_size))
+
+	possible_batch_ids = range(data.shape[0]-time_steps-1)
+	for i in range(NUM_TRAIN_BATCHES):
+		# Sample time_steps consecutive samples from the dataset text file
+		batch_id = random.sample( possible_batch_ids, batch_size )
+
+		for j in range(time_steps):
+			ind1 = [k+j for k in batch_id]
+			ind2 = [k+j+1 for k in batch_id]
+
+			batch[:, j, :] = data[ind1, :]
+			batch_y[:, j, :] = data[ind2, :]
+
+
+		cst = net.train_batch(batch, batch_y)
+
+		if (i%100) == 0:
+			new_time = time.time()
+			diff = new_time - last_time
+			last_time = new_time
+
+			print "batch: ",i,"   loss: ",cst,"   speed: ",(100.0/diff)," batches / s"
+
+	saver.save(sess, "saved/model.ckpt")
+
+
+
+
+## 2) GENERATE LEN_TEST_TEXT CHARACTERS USING THE TRAINED NETWORK
+
+if ckpt_file != "":
+	saver.restore(sess, ckpt_file)
+
+
+for i in range(len(TEST_PREFIX)):
+	out = net.run_step(TEST_PREFIX[i], i==0)
+
+print "SENTENCE:"
+gen = TEST_PREFIX
+for i in range(LEN_TEST_TEXT):
+	#element = np.random.choice( range(len(vocab)), p=out ) # Sample character from the network according to the generated output probabilities
+	np.concatenate((gen, out))
+
+	out = net.run_step(out , False )
+print gen
