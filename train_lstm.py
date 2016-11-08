@@ -59,14 +59,14 @@ class ModelNetwork:
 			network_output = ( tf.matmul( outputs_reshaped, self.rnn_out_W ) + self.rnn_out_B )
 
 			batch_time_shape = tf.shape(outputs)
-			self.final_outputs = tf.reshape( tf.nn.softmax( network_output), (batch_time_shape[0], batch_time_shape[1], self.out_size) )
-
+			self.final_outputs = tf.reshape(network_output, (batch_time_shape[0], batch_time_shape[1], self.out_size) )
 
 			## Training: provide target outputs for supervised training.
 			self.y_batch = tf.placeholder(tf.float32, (None, None, self.out_size))
 			y_batch_long = tf.reshape(self.y_batch, [-1, self.out_size])
 
-			self.cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(network_output, y_batch_long) )
+			#self.cost = tf.reduce_mean( tf.nn.softmax_cross_entropy_with_logits(network_output, y_batch_long) )
+			self.cost = tf.reduce_mean(tf.nn.l2_loss(tf.sub(network_output, y_batch_long)))
 			self.train_op = tf.train.RMSPropOptimizer(self.learning_rate, 0.9).minimize(self.cost)
 
 
@@ -117,7 +117,7 @@ def decode_embed(array, vocab):
 
 
 ckpt_file = ""
-TEST_PREFIX = np.array([[0]*4800])
+TEST_PREFIX = np.array([[[0]*4800]])
 
 print "Usage:"
 print '\t\t ', sys.argv[0], ' [ckpt model to load] [prefix, e.g., "The "]'
@@ -133,12 +133,12 @@ if len(sys.argv)==3:
 # vocab = list(set(data_))
 
 data = np.load("./dataset.npy")
-
+print(data.shape)
 
 in_size = out_size = 4800
 lstm_size = 256 #128
-num_layers = 2
-batch_size = 32 #128
+num_layers = 3
+batch_size = 64
 time_steps = 9 #50
 
 NUM_TRAIN_BATCHES = 20000
@@ -157,7 +157,7 @@ net = ModelNetwork(in_size = in_size,
 					num_layers = num_layers,
 					out_size = out_size,
 					session = sess,
-					learning_rate = 0.003,
+					learning_rate = 0.0001,
 					name = "char_rnn_network")
 
 sess.run( tf.initialize_all_variables() )
@@ -179,11 +179,8 @@ if ckpt_file == "":
 		batch_id = random.sample( possible_batch_ids, batch_size )
 
 		for j in range(time_steps):
-			ind1 = [k+j for k in batch_id]
-			ind2 = [k+j+1 for k in batch_id]
-
-			batch[:, j, :] = data[batch_id, ind1, :]
-			batch_y[:, j, :] = data[batch_id, ind2, :]
+			batch[:, j, :] = data[batch_id, j, :]
+			batch_y[:, j, :] = data[batch_id, j+1, :]
 
 		cst = net.train_batch(batch, batch_y)
 
@@ -192,8 +189,16 @@ if ckpt_file == "":
 			diff = new_time - last_time
 			last_time = new_time
 			print "batch: ",i,"   loss: ",cst,"   speed: ",(100.0/diff)," batches / s"
-
-	saver.save(sess, "saved/model.ckpt")
+		if (i%1000) == 0:
+			gen = TEST_PREFIX
+			out = np.array([net.run_step(TEST_PREFIX[0], True)])
+			for j in range(LEN_TEST_TEXT):
+				gen = np.append(gen, out)
+				out = net.run_step(out, False)
+				out = np.array([out])
+			scaled = np.int16(gen/np.max(np.abs(gen)) * 32767)
+			write('test' + str(i) + ".wav", 4800, scaled)
+	saver.save(sess, "model.ckpt")
 
 
 ## 2) GENERATE LEN_TEST_TEXT CHARACTERS USING THE TRAINED NETWORK
@@ -202,13 +207,14 @@ if ckpt_file != "":
 	saver.restore(sess, ckpt_file)
 
 for i in range(len(TEST_PREFIX)):
-	out = net.run_step(TEST_PREFIX[i], i==0)
+	out = np.array([net.run_step(TEST_PREFIX[i], i==0)])
 
 print "GENERATING"
 gen = TEST_PREFIX
 for i in range(LEN_TEST_TEXT):
 	#element = np.random.choice( range(len(vocab)), p=out ) # Sample character from the network according to the generated output probabilities
-	np.concatenate((gen, out))
+	gen = np.append(gen, out)
 	out = net.run_step(out , False )
-scaled = np.int16(data/np.max(np.abs(data)) * 32767)
+	out = np.array([out])
+scaled = np.int16(gen/np.max(np.abs(gen)) * 32767)
 write('test.wav', 4800, scaled)
