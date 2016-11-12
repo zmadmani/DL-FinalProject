@@ -8,7 +8,10 @@ import os
 import wave
 import audioop
 
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 NEW_BITRATE = 4800 #bits per second
+srcDir = ROOT_DIR + "/raw_wavfiles"
+destDir = ROOT_DIR + "/downsampled_wavfiles"
 
 def downsampleWav(src, dst, inrate=44100, outrate=16000, inchannels=2, outchannels=1):
     if not os.path.exists(src):
@@ -51,10 +54,6 @@ def downsampleWav(src, dst, inrate=44100, outrate=16000, inchannels=2, outchanne
         return False
 
     return True
-
-	
-srcDir = "C:\\Users\\zaina\\Desktop\\School\\Master Year\\Deep Learning\\Final Project\\wav_dataset\\chunked\\"
-destDir = "C:\\Users\\zaina\\Desktop\\School\\Master Year\\Deep Learning\\Final Project\\wav_dataset\\ds_chunked\\"
 
 onlyfiles = [f for f in os.listdir(srcDir) if os.path.isfile(os.path.join(srcDir, f))]
 for file in onlyfiles:

@@ -3,8 +3,8 @@ import os
 import numpy as np
 from scipy.io.wavfile import read
 
-#dir = "C:\\Users\\zaina\\Desktop\\School\\Master Year\\Deep Learning\\Final Project\\wav_dataset\\ds_chunked\\"
-dir = "./ds_chunked/"
+ROOT_DIR = os.path.dirname(os.path.realpath(__file__))
+dir = ROOT_DIR + "/processed_wavfiles/"
 
 def pad(content, req_len=48000):
 	padded = np.zeros((req_len), dtype=float)
@@ -28,5 +28,5 @@ for i in range(len(onlyfiles)):
 			datapoint[i] = np.zeros(shape=(4800))
 
 	dataset[i] = datapoint
-	
+
 np.save("./dataset.npy",dataset)
