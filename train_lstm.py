@@ -95,29 +95,8 @@ class ModelNetwork:
 		return cost
 
 
-
-
-# Embed string to character-arrays -- it generates an array len(data) x len(vocab)
-# Vocab is a list of elements
-def embed_to_vocab(data_, vocab):
-	data = np.zeros((len(data_), len(vocab)))
-
-	cnt=0
-	for s in data_:
-		v = [0.0]*len(vocab)
-		v[vocab.index(s)] = 1.0
-		data[cnt, :] = v
-		cnt += 1
-
-	return data
-
-def decode_embed(array, vocab):
-	return vocab[ array.index(1) ]
-
-
-
 ckpt_file = ""
-TEST_PREFIX = np.array([[[0]*4800]])
+TEST_PREFIX = np.array([[[0]*2400]])
 
 print "Usage:"
 print '\t\t ', sys.argv[0], ' [ckpt model to load] [prefix, e.g., "The "]'
@@ -127,23 +106,24 @@ if len(sys.argv)==3:
 	TEST_PREFIX = sys.argv[2]
 
 
-
-
 ## Convert to 1-hot coding
 # vocab = list(set(data_))
 
 data = np.load("./dataset.npy")
 print(data.shape)
+exit()
+TEST_PREFIX = data[random.randint(0,1083),:3]
+print(TEST_PREFIX.shape)
 
-in_size = out_size = 4800
-lstm_size = 256 #128
-num_layers = 3
-batch_size = 64
-time_steps = 9 #50
+in_size = out_size = 2400
+lstm_size = 512 #128
+num_layers = 2
+batch_size = 32
+time_steps = 59 #50
 
 NUM_TRAIN_BATCHES = 20000
 
-LEN_TEST_TEXT = 18 # Number of test characters of text to generate after training the network
+LEN_TEST_TEXT = 20 # Number of test characters of text to generate after training the network
 
 
 
@@ -207,7 +187,7 @@ if ckpt_file != "":
 	saver.restore(sess, ckpt_file)
 
 for i in range(len(TEST_PREFIX)):
-	out = np.array([net.run_step(TEST_PREFIX[i], i==0)])
+	out = np.array([net.run_step([TEST_PREFIX[i]], i==0)])
 
 print "GENERATING"
 gen = TEST_PREFIX
